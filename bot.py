@@ -1,13 +1,39 @@
-import discord
+import logging.handlers
 import os
-from discord import app_commands
-from discord.ui import View, Button
+
+import discord
 from discord import ButtonStyle
-from dotenv import load_dotenv, find_dotenv
+from discord import app_commands
+from discord.ext import commands
+from discord.ui import View, Button
+from dotenv import load_dotenv
+
 from game import ShutTheBoxGame, GameState
 from helpers import box_ascii
 
-load_dotenv(dotenv_path=find_dotenv())
+load_dotenv()  # you shouldn't need to use find_dotenv, if it isn't passed it runs find automatically
+logger = logging.getLogger("discord.bot")
+logger.setLevel(os.getenv("log_level", default="NOTSET"))
+
+
+class ShutTheBoxCog(commands.Cog):
+    def __init__(self, *, bot):
+        logger.info(f"Loaded Cog: {self.__cog_name__}")
+
+    @app_commands.command(name="startshutthebox", description="Play Shut the Box")
+    @app_commands.describe(num_die='The number of dice to play with')
+    @app_commands.describe(die_faces='The number of faces on each die')
+    @app_commands.rename(num_die="number_of_die")
+    @app_commands.rename(die_faces="number_of_faces")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def init_game(self, interaction: discord.Interaction, num_die: int, die_faces: int):
+        logger.debug(f"Start Shut the Box game with {num_die}d{die_faces} by {interaction.user}")
+        new_game = ShutTheBoxGame(die_faces, num_die)
+        view = View()
+        view.add_item(RollButton(game=new_game))
+        await interaction.response.send_message(f"{interaction.user} is playing with {num_die}d{die_faces}", view=view)
+
 
 class RollButton(Button):
     def __init__(self, game: ShutTheBoxGame):
@@ -17,6 +43,10 @@ class RollButton(Button):
     async def callback(self, interaction: discord.Interaction):
         self.game.handle_roll()
         roll = self.game.get_die_remaining()
+
+        logger.debug(f"{roll=}")
+        logger.debug(f"{self.game.get_possible_flips()=}")
+        logger.debug(f"{self.game.sums_table.sums_dict}")
 
         match self.game.get_game_state():
             case GameState.FLIP_BOXES:
@@ -41,16 +71,22 @@ class ShutButton(Button):
     async def callback(self, interaction: discord.Interaction):
         self.game.handle_flip(self.num)
 
+        logger.debug(f"Flipped num: {self.num}")
+        logger.debug((self.game.get_boxes_closed()))
+        # logger.debug(box_ascii(self.game.get_boxes_closed()))
+        logger.debug(f"{self.game.get_die_remaining()=}")
+        logger.debug(f"{self.game.get_game_state()=}")
+
         rem = self.game.get_die_remaining()
         ascii_rem = box_ascii(self.game.get_boxes_closed())
 
         match self.game.get_game_state():
-            
+
             case GameState.ROLL:
                 view = View()
                 view.add_item(RollButton(game=self.game))
                 await interaction.response.send_message(
-                    content=f"Closed box {self.num}. Roll again!\n{ascii_rem}", 
+                    content=f"Closed box {self.num}. Roll again!\n{ascii_rem}",
                     view=view
                 )
             case GameState.FLIP_BOXES:
@@ -58,7 +94,7 @@ class ShutButton(Button):
                 for choice in self.game.get_possible_flips():
                     view.add_item(ShutButton(self.game, choice))
                 await interaction.response.send_message(
-                    content=f"Closed box {self.num}. Keep going!\n{ascii_rem}", 
+                    content=f"Closed box {self.num}. Keep going!\n{ascii_rem}",
                     view=view
                 )
             case GameState.WIN:
@@ -69,40 +105,19 @@ class ShutButton(Button):
         self.view.stop()
 
 
-
-class BotClient(discord.Client):
-    def __init__(self, *, intents, **options):
-        super().__init__(intents=intents, **options)
-        self.tree = app_commands.CommandTree(self)
-
-        @self.tree.command(
-            name="shutthebox",
-            description="Play Shut the Box",
-        )
-        @app_commands.describe(num_die='The number of dice to play with')
-        @app_commands.describe(die_faces='The number of faces on each die')
-        async def init_game(interaction: discord.Interaction, num_die: int, die_faces: int):
-            new_game = ShutTheBoxGame(die_faces, num_die)
-            view = View()
-            view.add_item(RollButton(game=new_game))
-            await interaction.response.send_message(
-f"""{interaction.user} is playing with {num_die}d{die_faces}""",
-                    view=view
-                )
-
+class Bot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        super().__init__(intents=intents, command_prefix="we don't use this but it is required")
 
     async def on_ready(self):
-        await self.tree.sync()
-        print(f'Logged on as {self.user}!')
+        logger.info(f"Logged in as {self.user}, ID: {self.user.id}")
 
-    async def on_message(self, message: discord.Message):
-        pass
-
-intents = discord.Intents.default()
-intents.message_content = True
-
-client = BotClient(intents=intents)
-client.run(os.getenv('BOT_TOKEN', ''))
+    async def setup_hook(self):
+        await self.add_cog(ShutTheBoxCog(bot=self))
+        synced = await self.tree.sync()
+        logger.info(f"Synced commands: {[x.name for x in synced]}")
 
 
-# https://discord.com/oauth2/authorize?client_id=1320431680196186122&permissions=309237713920&scope=bot
+bot: commands.Bot = Bot()
+bot.run(os.getenv("BOT_TOKEN"))
