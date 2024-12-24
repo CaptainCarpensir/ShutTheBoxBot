@@ -38,3 +38,8 @@ def box_ascii(boxes_closed) -> str:
     ascii += '-' * ((box_len + 1) + (num_digits * box_len))
     ascii += "```"
     return ascii
+
+if __name__ == "__main__":
+    table = SumsTable()
+    sums_table = table.get_all_sums(12)
+    print(sums_table)
