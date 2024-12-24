@@ -49,7 +49,6 @@ class ShutTheBoxGame:
             raise ValueError("Incorrect state")
 
         # Roll die
-
         sum = 0
         for _ in range(self.num_die):
             sum += random.randint(1, self.num_faces)
